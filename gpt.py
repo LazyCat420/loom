@@ -2,6 +2,10 @@ import os
 import time
 import traceback
 from pprint import pprint
+import httpx
+import json
+import asyncio
+import uuid
 
 from celery import Celery
 import openai
@@ -47,57 +51,91 @@ import json
 
 #ai21_api_key = os.environ.get("AI21_API_KEY", None)
 
-client = openai.Client(api_key=os.environ.get("OPENAI_API_KEY", 'placeholder'))
+# Only initialize OpenAI client if we're using OpenAI models
+if os.environ.get("OPENAI_API_KEY"):
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+else:
+    client = None
 
 
-def gen(prompt, settings, config, **kwargs):
-    if settings["stop"]:
-        stop = parse_stop(settings["stop"])
-    else:
-        stop = None
-    if settings["logit_bias"]:
-        logit_bias = parse_logit_bias(settings["logit_bias"])
-    else:
-        logit_bias = None
-    #if config['OPENAI_API_KEY']:
-    model_info = config['models'][settings['model']]
-    # print('model info:', model_info)
-    client.base_url = model_info['api_base'] if model_info['api_base'] else "https://api.openai.com/v1"
-
-    ai21_api_key = kwargs.get('AI21_API_KEY', None)
-    ai21_api_key = ai21_api_key if ai21_api_key else os.environ.get("AI21_API_KEY", None)
-    client.api_key, client.organization = get_correct_key(model_info['type'], kwargs)
-
-    # print('openai api base: ' + openai.api_base)
-
-    # print('openai api key: ' + openai.api_key)
-
-    # if config['AI21_API_KEY']:
-        #TODO
-        # ai21_api_key = config['AI21_API_KEY']
+def gen(prompt, generation_settings, model_config, **kwargs):
+    model = generation_settings["model"]
+    model_info = model_config["models"][model]
+    
     try:
-        response, error = generate(prompt=prompt,
-                                length=settings['response_length'],
-                                num_continuations=settings['num_continuations'],
-                                temperature=settings['temperature'],
-                                logprobs=settings['logprobs'],
-                                top_p=settings['top_p'],
-                                model=settings['model'],
-                                stop=stop,
-                                logit_bias=logit_bias,
-                                config=config,
-                                ai21_api_key=ai21_api_key,
-                                )
+        # Handle all models through generate() function
+        response, error = generate(
+            prompt=prompt,
+            length=generation_settings['response_length'],
+            num_continuations=generation_settings['num_continuations'],
+            temperature=generation_settings['temperature'],
+            logprobs=generation_settings['logprobs'],
+            top_p=generation_settings['top_p'],
+            model=generation_settings['model'],
+            stop=parse_stop(generation_settings["stop"]) if generation_settings["stop"] else None,
+            logit_bias=parse_logit_bias(generation_settings["logit_bias"]) if generation_settings["logit_bias"] else None,
+            config=model_config,
+            ai21_api_key=kwargs.get('AI21_API_KEY', os.environ.get("AI21_API_KEY", None))
+        )
         return response, error
+
     except Exception as e:
-        print(e)
-        return None, e
+        print(f"Generation error: {str(e)}")
+        traceback.print_exc()
+        return None, str(e)
 
 
 def generate(config, **kwargs):
-    #pprint(kwargs)
     model_type = config['models'][kwargs['model']]['type']
-    if model_type == 'ai21':
+    
+    # Add special handling for Ollama
+    if model_type == 'ollama':
+        try:
+            completions = []
+            # Make separate calls for each continuation to get different responses
+            for _ in range(kwargs['num_continuations']):
+                response = httpx.post(
+                    f"{config['models'][kwargs['model']]['api_base']}/api/generate",
+                    json={
+                        "model": config['models'][kwargs['model']]['model'],
+                        "prompt": kwargs['prompt'],
+                        "stream": False,
+                        "temperature": kwargs['temperature'],
+                        "top_p": kwargs['top_p'],
+                    },
+                    headers={"Content-Type": "application/json"},
+                    timeout=30.0
+                )
+                
+                if response.status_code != 200:
+                    return None, f"Ollama API error: {response.text}"
+                
+                result = response.json()
+                completions.append({
+                    "text": result["response"],
+                    "tokens": None,
+                    "finishReason": "stop"
+                })
+            
+            # Format response to match expected structure
+            formatted_response = {
+                "completions": completions,
+                "prompt": {
+                    "text": kwargs['prompt'],
+                    "tokens": None
+                },
+                "id": str(uuid.uuid4()),
+                "model": kwargs['model'],
+                "timestamp": timestamp()
+            }
+            return formatted_response, None
+            
+        except Exception as e:
+            print(f"Ollama generation error: {str(e)}")
+            return None, str(e)
+            
+    elif model_type == 'ai21':
         response, error = ai21_generate(api_key=kwargs['ai21_api_key'], **kwargs)#config['AI21_API_KEY'], **kwargs)
         #save_response_json(response.json(), 'examples/AI21_response.json')
         if not error:
@@ -262,6 +300,10 @@ def format_openAI_response(response, prompt, echo, is_chat):
 @retry(n_tries=3, delay=1, backoff=2, on_failure=lambda *args, **kwargs: ("", None))
 def openAI_generate(model_type, prompt, length=150, num_continuations=1, logprobs=10, temperature=0.8, top_p=1, stop=None,
                     model='davinci', logit_bias=None, **kwargs):
+    # Return early if we don't have an OpenAI client and we're trying to use OpenAI
+    if not client and model_type in ('openai', 'openai-custom', 'openai-chat'):
+        return None, "OpenAI API key not configured"
+        
     if not logit_bias:
         logit_bias = {}
     params = {
@@ -273,7 +315,6 @@ def openAI_generate(model_type, prompt, length=150, num_continuations=1, logprob
         'n': num_continuations,
         'stop': stop,
         'model': model,
-        #**kwargs
     }
     if model_type == 'openai-chat':
         params['messages'] = [{ 'role': "assistant", 'content': prompt }]

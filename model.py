@@ -182,6 +182,11 @@ DEFAULT_MODEL_CONFIG = {
             'type': 'gooseai',
             'api_base': None,
             },
+        'ollama': {
+            'model': 'llama3.2:latest',  # Using llama3.2:latest
+            'type': 'ollama',
+            'api_base': 'http://10.0.0.29:11434'
+        },
     },
     # 'api_base': None,
     # 'api_key': os.environ.get("API_KEY", ''),

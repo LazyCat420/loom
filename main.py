@@ -20,6 +20,7 @@ from view.colors import darkmode
 import PIL.Image
 import PIL.ImageTk
 from copy import deepcopy
+from src.app.api.init_config import initialize_config
 
 class Application:
 
@@ -53,7 +54,7 @@ class Application:
         self.tabs = []
 
         # Load app data
-        self.app_data_file = os.path.join(os.getcwd(), "data/", ".app_data.json")
+        self.app_data_file = initialize_config()
         self.app_data = None
         self.initialize_app_state()
 
@@ -79,14 +80,15 @@ class Application:
         self.args = parser.parse_args()
 
     def initialize_app_state(self):
+        # Initialize config and get the path
+        self.app_data_file = initialize_config()
+        
         try:
-            self.app_data = json_open(self.app_data_file)  # if os.path.isfile(self.app_data_file) else {}
+            self.app_data = json_open(self.app_data_file)
             for tab_data in self.app_data["tabs"]:
                 self.create_tab(filename=tab_data["filename"])
         except Exception as e:
-            print("Failed to load with app data")
-            print(str(e))
-            print(traceback.format_exc())
+            print(f"Failed to load with app data\n{str(e)}")
             self.app_data = {}
 
         if len(self.tabs) == 0:
