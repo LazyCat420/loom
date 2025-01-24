@@ -187,6 +187,11 @@ DEFAULT_MODEL_CONFIG = {
             'type': 'ollama',
             'api_base': 'http://10.0.0.29:11434'
         },
+        'lmstudio': {
+            'model': 'deepseek-r1-distill-llama-8b',
+            'type': 'lmstudio',
+            'api_base': 'http://169.254.83.107:4004/v1'
+        },
     },
     # 'api_base': None,
     # 'api_key': os.environ.get("API_KEY", ''),

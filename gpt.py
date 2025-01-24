@@ -89,8 +89,60 @@ def gen(prompt, generation_settings, model_config, **kwargs):
 def generate(config, **kwargs):
     model_type = config['models'][kwargs['model']]['type']
     
+    # Add special handling for LMStudio
+    if model_type == 'lmstudio':
+        try:
+            completions = []
+            # Make separate calls for each continuation to get different responses
+            for _ in range(kwargs['num_continuations']):
+                response = httpx.post(
+                    f"{config['models'][kwargs['model']]['api_base']}/chat/completions",
+                    json={
+                        "model": config['models'][kwargs['model']]['model'],
+                        "messages": [
+                            {"role": "system", "content": "You are a helpful AI assistant."},
+                            {"role": "user", "content": kwargs['prompt']}
+                        ],
+                        "stream": False,
+                        "temperature": kwargs['temperature'],
+                        "max_tokens": -1
+                    },
+                    headers={
+                        "Content-Type": "application/json"
+                    },
+                    timeout=30.0
+                )
+                
+                if response.status_code != 200:
+                    return None, f"LMStudio API error: {response.text}"
+                
+                result = response.json()
+                completions.append({
+                    "text": result["choices"][0]["message"]["content"],
+                    "tokens": None,
+                    "finishReason": result["choices"][0]["finish_reason"]
+                })
+            
+            # Format response to match expected structure
+            formatted_response = {
+                "completions": completions,
+                "prompt": {
+                    "text": kwargs['prompt'],
+                    "tokens": None
+                },
+                "id": str(uuid.uuid4()),
+                "model": kwargs['model'],
+                "timestamp": timestamp()
+            }
+            return formatted_response, None
+            
+        except Exception as e:
+            print(f"LMStudio generation error: {str(e)}")
+            traceback.print_exc()
+            return None, str(e)
+            
     # Add special handling for Ollama
-    if model_type == 'ollama':
+    elif model_type == 'ollama':
         try:
             completions = []
             # Make separate calls for each continuation to get different responses
