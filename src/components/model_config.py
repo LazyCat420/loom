@@ -22,6 +22,11 @@ class ModelConfig:
                 label="Ollama",
                 value="ollama",
                 models=["llama3.2:latest"]
+            ),
+            ModelOption(
+                label="LM Studio",
+                value="lmstudio",
+                models=["mistral-small-22b-arliai-rpmax-v1.1"]
             )
         ]
     
@@ -30,4 +35,7 @@ class ModelConfig:
             self.api_key = None
             self.endpoint = "http://10.0.0.29:11434"
         elif provider == "openai":
-            self.endpoint = "https://api.openai.com/v1" 
+            self.endpoint = "https://api.openai.com/v1"
+        elif provider == "lmstudio":
+            self.api_key = None
+            self.endpoint = "http://127.0.0.1:80/v1" 
